@@ -31,7 +31,7 @@ export async function POST(req: Request) {
       );
     }
 
-    console.log(`[Chat API] Model: ${model}, Style: ${style}, TwoVariants: ${twoVariants}`);
+    console.log(`[Chat API] Model: ${model}, Style: ${style}, TwoVariants: ${twoVariants}, Diet: ${diet || "ninguna"}`);
 
     // Build messages with system prompt at the beginning
     const variantsInstruction = twoVariants
@@ -40,13 +40,15 @@ export async function POST(req: Request) {
 
     const styleInstruction = `\n\nEstilo de receta: ${style}. ${style === "rápida y concisa" ? "Formato compacto sin emojis decorativos." : style === "elaborada y detallada" ? "Máximo detalle con técnicas, tiempos precisos y variantes." : "Formato estándar con emojis y estructura clara."}`;
 
-    const systemPrompt = `${baseSystemPrompt}${styleInstruction}${variantsInstruction}`;
+    // Instrucción de dieta FIRME y al inicio
+    const dietInstruction = diet 
+      ? `\n\n🔴 RESTRICCIÓN DIETARIA ACTIVA: ${diet}\nAdapta TODOS los ingredientes y sustitutos para cumplir estrictamente con: ${diet}\nSi usas ingredientes que violen esta restricción, la respuesta será INCORRECTA.`
+      : "";
 
-    const userDietInstruction = diet ? `
-El usuario solicita esta adaptación dietaria: ${diet}. Ajusta ingredientes y sustitutos para respetarla.` : "";
+    const systemPrompt = `${baseSystemPrompt}${dietInstruction}${styleInstruction}${variantsInstruction}`;
 
     const messagesWithSystem = [
-      { role: "system", content: `${systemPrompt}${userDietInstruction}` },
+      { role: "system", content: systemPrompt },
       ...messages,
     ];
 
