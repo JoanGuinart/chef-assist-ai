@@ -15,6 +15,7 @@ export async function POST(req: Request) {
     const style = (body as { style?: string }).style || "estándar";
     const twoVariants = (body as { twoVariants?: boolean }).twoVariants ?? false;
     const diet = (body as { diet?: string }).diet?.trim();
+    const MODE = (process.env.MODE || "real").toLowerCase();
 
     if (!Array.isArray(messages) || messages.length === 0) {
       return NextResponse.json({ error: "No messages provided" }, { status: 400 });
@@ -24,14 +25,7 @@ export async function POST(req: Request) {
     const model = process.env.HUGGINGFACE_MODEL ?? "meta-llama/Llama-3.2-3B-Instruct";
     const baseSystemPrompt = process.env.SYSTEM_PROMPT || "Eres un asistente útil y amable.";
 
-    if (!HF_KEY) {
-      return NextResponse.json(
-        { error: "No HF_TOKEN en variables de entorno" },
-        { status: 500 }
-      );
-    }
-
-    console.log(`[Chat API] Model: ${model}, Style: ${style}, TwoVariants: ${twoVariants}, Diet: ${diet || "ninguna"}`);
+    console.log(`[Chat API] Mode: ${MODE}, Model: ${model}, Style: ${style}, TwoVariants: ${twoVariants}, Diet: ${diet || "ninguna"}`);
 
     // Build messages with system prompt at the beginning
     const variantsInstruction = twoVariants
@@ -51,6 +45,27 @@ export async function POST(req: Request) {
       { role: "system", content: systemPrompt },
       ...messages,
     ];
+
+    // Demo mode: generate local deterministic markdown without calling any model
+    if (MODE === "demo") {
+      const body = generateDemoResponse(messages, { style, twoVariants, diet });
+      // Banner visible sin interferir con la extracción del título (evitar encabezados ## o ** al inicio)
+        const banner = [
+          "> 🔴 MODO DEMO: motor de IA simulado; sin tokens ni costes.",
+          "> Para usar MODO REAL: clona el repo de mi cuenta de github https://github.com/JoanGuinart/chef-assist-ai, añade HF_TOKEN (con permiso Inference API) y pon MODE=real en .env.local.",
+          ""
+        ].join("\n");
+      const text = `${banner}${body}`;
+      return NextResponse.json({ text });
+    }
+
+    // If not demo, require HF token
+    if (!HF_KEY) {
+      return NextResponse.json(
+        { error: "No HF_TOKEN en variables de entorno" },
+        { status: 500 }
+      );
+    }
 
     // Call HuggingFace Router chat/completions endpoint directly
     const res = await fetch("https://router.huggingface.co/v1/chat/completions", {
@@ -92,4 +107,124 @@ export async function POST(req: Request) {
       { status: 500 }
     );
   }
+}
+
+// --- Demo generator ---
+function generateDemoResponse(
+  messages: Array<{ role: string; content: string }>,
+  opts: { style: string; twoVariants: boolean; diet?: string | null }
+): string {
+  const userLast = messages.filter(m => m.role === "user").at(-1)?.content || "Receta";
+  // Remove explicit restriction tag if present and trim
+  const cleaned = userLast.replace(/\[RESTRICCIONES DIETÉTICAS:[^\]]+\]/i, "").trim();
+  const baseTitle = toTitle(cleaned || "Receta Clásica");
+  const titleA = baseTitle;
+  const titleB = baseTitle.includes(" ") ? baseTitle.replace(/\s+/, " ") + " (Variante)" : baseTitle + " (Variante)";
+  const style = opts.style;
+  const diet = (opts.diet || "").trim();
+
+  if (opts.twoVariants) {
+    return [
+      buildRecipeMarkdown(titleA, style, diet, 1),
+      buildRecipeMarkdown(titleB, style, diet, 2)
+    ].join("\n\n\n");
+  }
+  return buildRecipeMarkdown(titleA, style, diet);
+}
+
+function toTitle(s: string): string {
+  // Basic title casing, keep accents
+  return s
+    .split(/\s+/)
+    .map((w, i) => (i === 0 ? cap(w) : w.toLowerCase()))
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function cap(w: string): string {
+  return w.charAt(0).toUpperCase() + w.slice(1);
+}
+
+function buildRecipeMarkdown(title: string, style: string, diet: string, variantIndex?: number): string {
+  const time = style === "rápida y concisa" ? 20 : style === "elaborada y detallada" ? 45 : 30;
+  const serves = 4;
+  const diff = style === "elaborada y detallada" ? "Media" : "Fácil";
+
+  const dietNote = diet
+    ? `\n\n> Adaptada a: **${diet}**`
+    : "";
+
+  // Ingredients template respecting diet softly (demo)
+  const baseIngredients = [
+    "- 250 g de pasta de canelones o espagueti",
+    "- 300 g de pollo o ternera (cocido y desmenuzado)",
+    "- 1 cebolla y 2 dientes de ajo, picados",
+    "- 400 g de tomate triturado",
+    "- 2 cucharadas de aceite de oliva",
+    "- Sal, pimienta y oréganos al gusto",
+    "- 150 g de queso rallado",
+  ];
+
+  const adaptedIngredients = adaptIngredients(baseIngredients, diet);
+
+  const stepsCompact = [
+    "1. Sofríe cebolla y ajo con aceite 4 min.",
+    "2. Añade tomate, hierbas y cocina 8 min.",
+    "3. Incorpora la proteína y ajusta sal.",
+    "4. Cuece la pasta al dente y mezcla con la salsa.",
+    "5. Sirve con queso y un toque de orégano.",
+  ];
+
+  const stepsDetailed = [
+    "1. Calienta aceite en sartén amplia (fuego medio). Sofríe cebolla y ajo 6–8 min hasta dorar ligero.",
+    "2. Agrega tomate triturado, orégano y pimienta. Cocina a fuego suave 12–15 min para reducir.",
+    "3. Incorpora la proteína (pollo/ternera) y cocina 5–7 min. Ajusta sal y rectifica acidez con pizca de azúcar si hace falta.",
+    "4. Hierve la pasta en abundante agua con sal hasta al dente. Reserva 2–3 cucharadas de agua de cocción.",
+    "5. Mezcla la pasta con la salsa, añade el agua de cocción para ligar y termina con el queso.",
+    "6. Opcional: gratina 5 min para dorar el queso.",
+  ];
+
+  const steps = style === "elaborada y detallada" ? stepsDetailed : stepsCompact;
+
+  const allergens = diet
+    ? `\n\n### ⚠️ Alérgenos y Sustitutos\n- Adaptada a **${diet}**. Usa productos certificados según la restricción indicada.`
+    : "";
+
+  const variants = variantIndex ? `\n\n### 🔄 Variantes\n- Esta es la variante ${variantIndex}. Cambia la proteína o añade verduras asadas.` : "";
+
+  return [
+    `## 🍽️ ${title}`,
+    `⏱️ **Tiempo**: ${time} min | 🍽️ **Raciones**: ${serves} | ⭐ **Dificultad**: ${diff}`,
+    dietNote,
+    "\n### 📝 Ingredientes",
+    ...adaptedIngredients,
+    "\n### 👨‍🍳 Preparación",
+    ...steps,
+    allergens,
+    variants,
+  ].filter(Boolean).join("\n");
+}
+
+function adaptIngredients(list: string[], diet: string): string[] {
+  if (!diet) return list;
+  const d = diet.toLowerCase();
+  return list.map(line => {
+    let out = line;
+    if (d.includes("sin gluten")) {
+      out = out.replace(/pasta[^,]*/i, "pasta certificada sin gluten");
+      out = out.replace(/harina/i, "harina sin gluten");
+    }
+    if (d.includes("sin lactosa") || d.includes("vegana")) {
+      out = out.replace(/queso rallado/i, d.includes("vegana") ? "queso vegetal rallado" : "queso sin lactosa");
+    }
+    if (d.includes("sin nueces")) {
+      out = out.replace(/nuez|nueces/gi, "(sin nueces)");
+    }
+    if (d.includes("fodmap")) {
+      out = out.replace(/cebolla/i, "cebolla verde (parte verde) o cebolleta");
+      out = out.replace(/ajo/i, "aceite infusionado con ajo (sin sólidos)");
+    }
+    return out;
+  });
 }
