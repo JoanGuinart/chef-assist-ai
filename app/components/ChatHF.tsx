@@ -307,9 +307,9 @@ export default function ChatHF() {
                   {m.role === "assistant" ? (
                     <div className="flex items-start gap-3">
                       <div className="flex-1">
-                        <ReactMarkdown className="prose prose-invert max-w-none prose-p:my-1 prose-li:my-1">
-                          {m.content}
-                        </ReactMarkdown>
+                        <div className="prose prose-invert max-w-none prose-p:my-1 prose-li:my-1">
+                          <ReactMarkdown>{m.content}</ReactMarkdown>
+                        </div>
                       </div>
                       {/* Botón para copiar el contenido del asistente */}
                       {m.id !== "m0" && (
